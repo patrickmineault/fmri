@@ -10,9 +10,9 @@ import numpy as np
 import pytest
 from ridge_utils.DataSequence import DataSequence
 from ridge_utils.tokenization_helpers import (
-    compute_correct_tokens_opt,
-    generate_efficient_feat_dicts_opt,
-    convert_to_feature_mats_opt,
+    _compute_correct_tokens_opt,
+    generate_efficient_feat_dicts,
+    convert_to_feature_mats,
 )
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
@@ -56,19 +56,19 @@ def generate_efficient_feat_dicts_opt_old(wordseqs, tokenizer, lookback1, lookba
         for i, w in enumerate(ds.data):
             if w.strip() != '' and w != "'s":
                 if acc_lookback < lookback1:
-                    new_tokens = compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
+                    new_tokens = _compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
                     #print(tokenizer.decode(torch.tensor(new_tokens)))
                     text_dict[(story, i)] = new_tokens
                     text_dict2[(story, i)] = False
                     text_dict3[tuple(new_tokens)] = False
                 elif lookback2 > acc_lookback and acc_lookback >= lookback1:
-                    new_tokens = compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
+                    new_tokens = _compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
                     #print(tokenizer.decode(torch.tensor(new_tokens)))
                     text_dict[(story, i)] = new_tokens
                     text_dict2[(story, i)] = False
                     text_dict3[tuple(new_tokens)] = False
                 elif acc_lookback == lookback2:
-                    new_tokens = compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
+                    new_tokens = _compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
                     #print(tokenizer.decode(torch.tensor(new_tokens)))
                     acc_lookback = lookback1
                     text_dict[(story, i)] = new_tokens
@@ -134,17 +134,17 @@ def convert_to_feature_mats_opt_old(wordseqs, tokenizer, lookback1, lookback2, t
         for i, w in enumerate(ds.data):
             if w.strip() != '' and w != "'s":
                 if acc_lookback < lookback1:
-                    new_tokens = compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
+                    new_tokens = _compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
                     text_dict[(story, i)] = new_tokens
                     text_dict2[(story, i)] = False
                     newdata.append(text_dict3[tuple(new_tokens)])
                 elif lookback2 > acc_lookback and acc_lookback >= lookback1:
-                    new_tokens = compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
+                    new_tokens = _compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
                     text_dict[(story, i)] = new_tokens
                     text_dict2[(story, i)] = False
                     newdata.append(text_dict3[tuple(new_tokens)])
                 elif acc_lookback == lookback2:
-                    new_tokens = compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
+                    new_tokens = _compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
                     acc_lookback = lookback1
                     text_dict[(story, i)] = new_tokens
                     text_dict2[(story, i)] = True
@@ -206,7 +206,7 @@ def test_refactored_functions(ds):
     )
     
     # Test refactored functions
-    word_to_tokens, compute_embeddings_flags, token_sequence_registry = generate_efficient_feat_dicts_opt(
+    word_to_tokens, compute_embeddings_flags, token_sequence_registry = generate_efficient_feat_dicts(
         wordseqs, tokenizer, lookback1, lookback2
     )
     
@@ -235,7 +235,7 @@ def test_feature_extraction_refactored(ds):
         wordseqs, tokenizer, lookback1, lookback2
     )
     
-    word_to_tokens, compute_embeddings_flags, token_sequence_registry = generate_efficient_feat_dicts_opt(
+    word_to_tokens, compute_embeddings_flags, token_sequence_registry = generate_efficient_feat_dicts(
         wordseqs, tokenizer, lookback1, lookback2
     )
     
@@ -255,6 +255,16 @@ def test_feature_extraction_refactored(ds):
                 prefix = this_key[: ei + 1]
                 if prefix in text_dict3_orig:
                     text_dict3_orig[prefix] = out[ei, :]
+
+    for word, compute_embedding in compute_embeddings_flags.items():
+        if compute_embedding:
+            inputs = {"input_ids": torch.tensor([word_to_tokens[word]]).int()}
+            inputs["attention_mask"] = torch.ones(inputs["input_ids"].shape)
+            out = list(model(**inputs, output_hidden_states=True)[2])
+            out = out[layer_num][0].detach().numpy()
+            this_key = tuple(inputs["input_ids"][0].numpy())
+            for ei, _ in enumerate(this_key):
+                prefix = this_key[: ei + 1]
                 if prefix in token_sequence_registry:
                     token_sequence_registry[prefix] = out[ei, :]
     
@@ -263,7 +273,7 @@ def test_feature_extraction_refactored(ds):
         wordseqs, tokenizer, lookback1, lookback2, text_dict3_orig
     )
     
-    feats_refactored = convert_to_feature_mats_opt(
+    feats_refactored = convert_to_feature_mats(
         wordseqs, word_to_tokens, token_sequence_registry
     )
     
@@ -284,4 +294,52 @@ def test_feature_extraction_refactored(ds):
             atol=1e-8,
             err_msg=f"Features don't match for {story}"
         )
+
+def test_unified_interface_opt(ds):
+    """Test that the unified interface works correctly for OPT tokenization."""
+    wordseqs = {"wheretheressmoke": ds}
+    tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+    lookback1, lookback2 = 256, 512
+    
+    # Test that the unified interface produces the same results as the old OPT-specific functions
+    text_dict_orig, text_dict2_orig, text_dict3_orig = generate_efficient_feat_dicts_opt_old(
+        wordseqs, tokenizer, lookback1, lookback2
+    )
+    
+    # Use the unified interface
+    word_to_tokens, compute_embeddings_flags, token_sequence_registry = generate_efficient_feat_dicts(
+        wordseqs, tokenizer, lookback1, lookback2
+    )
+    
+    # Results should be identical
+    assert set(text_dict_orig.keys()) == set(word_to_tokens.keys())
+    assert set(text_dict2_orig.keys()) == set(compute_embeddings_flags.keys())
+    assert set(text_dict3_orig.keys()) == set(token_sequence_registry.keys())
+    
+    for key in text_dict_orig.keys():
+        assert text_dict_orig[key] == word_to_tokens[key]
+        assert text_dict2_orig[key] == compute_embeddings_flags[key]
+    
+    for key in text_dict3_orig.keys():
+        assert text_dict3_orig[key] == token_sequence_registry[key]
+
+def test_tokenizer_detection():
+    """Test that different tokenizer types are properly detected."""
+    # Test OPT detection
+    tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+    
+    # This should work without raising an exception
+    wordseqs = {"test": DataSequence(["test", "words"], [2], [1.0, 2.0], [0, 2, 4])}
+    word_to_tokens, _, _ = generate_efficient_feat_dicts(wordseqs, tokenizer, 5, 10)
+    assert len(word_to_tokens) > 0
+    
+    # Test unsupported tokenizer
+    class UnsupportedTokenizer:
+        def __init__(self):
+            self.name_or_path = "unsupported/model"
+    
+    unsupported_tokenizer = UnsupportedTokenizer()
+    
+    with pytest.raises(NotImplementedError, match="not supported"):
+        generate_efficient_feat_dicts(wordseqs, unsupported_tokenizer, 5, 10)
 
