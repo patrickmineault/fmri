@@ -19,6 +19,11 @@ LLAMA_BOS_TOKEN = 1
 LLAMA_WORD_BOUNDARY_TOKEN = 29947
 LLAMA_SPACE_TOKEN = 29871
 
+# GEMMA 2 tokenizer constants (same as original Gemma)
+GEMMA2_BOS_TOKEN = 2
+GEMMA2_WORD_BOUNDARY_TOKEN = 256001 # Length is 256000
+GEMMA2_SPACE_TOKEN = 235248
+
 def _compute_correct_tokens_opt(acc, acc_lookback, acc_offset, total_len):
     #print(acc)
     new_tokens = []
@@ -64,6 +69,35 @@ def _compute_correct_tokens_llama(acc, acc_lookback, acc_offset, total_len):
     acc_count_all = 0
     while acc_count8 != (last_word - first_word):
         if acc2[acc_count_all] == LLAMA_WORD_BOUNDARY_TOKEN:
+            acc_count8 += 1
+            acc_count_all += 1
+        else:
+            new_tokens.append(acc2[acc_count_all])
+            acc_count_all += 1
+    return new_tokens
+
+
+def _compute_correct_tokens_gemma2(acc, acc_lookback, acc_offset, total_len):
+    """
+    Compute correct tokens for Gemma 2 models.
+    Uses same logic as LLAMA since Gemma 2 uses SentencePiece tokenization.
+    """
+    new_tokens = [GEMMA2_BOS_TOKEN]
+    acc_count_all = 0
+    first_word = max(0,acc_offset-acc_lookback)
+    last_word = min(acc_offset+1, total_len)
+    acc_start = 0
+    while acc_start != first_word + 1:
+        if acc[acc_count_all] == GEMMA2_WORD_BOUNDARY_TOKEN:
+            acc_start += 1
+            acc_count_all += 1
+        else:
+            acc_count_all += 1
+    acc2 = acc[acc_count_all:]
+    acc_count8 = 0
+    acc_count_all = 0
+    while acc_count8 != (last_word - first_word):
+        if acc2[acc_count_all] == GEMMA2_WORD_BOUNDARY_TOKEN:
             acc_count8 += 1
             acc_count_all += 1
         else:
@@ -151,6 +185,50 @@ def _annotate_word_boundaries_llama(words, tokenizer, story):
     return annotated_tokens
 
 
+def _annotate_word_boundaries_gemma2(words, tokenizer, story):
+    """
+    Tokenize words and annotate word boundaries with special marker for Gemma 2.
+    Gemma 2 tokenizer behavior: first word has no ▁ prefix, subsequent words do.
+    
+    Args:
+        words: List of words in the story
+        tokenizer: Gemma 2 tokenizer
+        story: Story name (unused for Gemma 2 but kept for consistency)
+        
+    Returns:
+        List of tokens with word boundary markers inserted
+    """
+    text = [" ".join(words)]
+    inputs = tokenizer(text, return_tensors="pt")
+    tokens = np.array(inputs['input_ids'][0])
+    assert (GEMMA2_WORD_BOUNDARY_TOKEN not in tokens)  # Ensure our boundary marker isn't in the original tokens
+    
+    annotated_tokens = [GEMMA2_BOS_TOKEN]  # Start with BOS token
+    
+    for ei, token_id in enumerate(tokens):
+        # Skip the BOS token that's already in the original tokenization
+        if ei == 0 and token_id == GEMMA2_BOS_TOKEN:
+            continue
+            
+        # Gemma 2 tokenizer behavior: first content word has no ▁, subsequent words do
+        token_str = tokenizer.convert_ids_to_tokens(torch.tensor([token_id]))[0]
+        decoded_token = tokenizer.decode(torch.tensor([token_id]))
+        
+        # For Gemma 2: first word after BOS is a word boundary, then ▁ tokens are word boundaries
+        if (ei == 1 or  # First content word (after BOS)
+            (token_str.startswith('▁'))):
+            annotated_tokens.append(GEMMA2_WORD_BOUNDARY_TOKEN)
+            annotated_tokens.append(token_id)
+        else:
+            annotated_tokens.append(token_id)
+        
+    
+    
+    annotated_tokens.append(GEMMA2_WORD_BOUNDARY_TOKEN)  # Final boundary marker
+    print(annotated_tokens[-10:])
+    return annotated_tokens
+
+
 def _is_edge_case_word_boundary_opt(token_idx, token_id, story):
     """Handle specific tokenization edge cases for word boundaries."""
     edge_cases = [
@@ -197,7 +275,7 @@ def generate_efficient_feat_dicts(wordseqs, tokenizer, half_window, full_window)
 
     Args:
         wordseqs: Dict mapping story name to DataSequence
-        tokenizer: Tokenizer (supports facebook/opt-125m and LLAMA models)
+        tokenizer: Tokenizer (supports facebook/opt-125m, LLAMA models, and google/gemma-2* models)
         half_window: Half window size
         full_window: Full window size
     
@@ -221,6 +299,11 @@ def generate_efficient_feat_dicts(wordseqs, tokenizer, half_window, full_window)
         WORD_BOUNDARY_TOKEN = LLAMA_WORD_BOUNDARY_TOKEN
         annotate_word_boundaries = _annotate_word_boundaries_llama
         compute_correct_tokens = _compute_correct_tokens_llama
+    elif "gemma-2" in tokenizer.name_or_path.lower() or "gemma2" in tokenizer.name_or_path.lower():
+        BOS_TOKEN = GEMMA2_BOS_TOKEN
+        WORD_BOUNDARY_TOKEN = GEMMA2_WORD_BOUNDARY_TOKEN
+        annotate_word_boundaries = _annotate_word_boundaries_gemma2
+        compute_correct_tokens = _compute_correct_tokens_gemma2
     else:
         raise NotImplementedError(f"Tokenizer {tokenizer.name_or_path} not supported")
     
@@ -231,8 +314,9 @@ def generate_efficient_feat_dicts(wordseqs, tokenizer, half_window, full_window)
         # Tokenize the entire story and annotate word boundaries
         annotated_tokens = annotate_word_boundaries(ds.data, tokenizer, story)
         
-        # Validate word count for LLAMA (similar to original implementation)
-        if "llama" in tokenizer.name_or_path.lower() or "Llama" in tokenizer.name_or_path:
+        # Validate word count for LLAMA and Gemma 2 (similar to original implementation)
+        if ("llama" in tokenizer.name_or_path.lower() or "Llama" in tokenizer.name_or_path or
+            "gemma-2" in tokenizer.name_or_path.lower() or "gemma2" in tokenizer.name_or_path.lower()):
             word_count = sum(1 for word in ds.data if word.strip() != '')
             boundary_count = annotated_tokens.count(WORD_BOUNDARY_TOKEN) - 1  # Subtract final boundary
             assert boundary_count == word_count, f"Word count mismatch: {boundary_count} boundaries vs {word_count} words"

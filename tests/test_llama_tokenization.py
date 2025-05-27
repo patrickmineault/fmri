@@ -97,13 +97,20 @@ def generate_efficient_feat_dicts_llama_old(wordseqs, tokenizer, lookback1, look
 
 @pytest.fixture(scope="session")
 def test_data():
-    """Create test data for LLAMA tokenization tests."""
-    story_words = ["the", "quick", "brown", "fox", "jumps", "over", "the", "lazy", "dog"] * 20  # 180 words
+    # Load test data
+    try:
+        with open("../data/wheretheressmoke_punc.txt", "r") as f:
+            story_words = f.read().split()
+    except FileNotFoundError:
+        # Fallback to dummy data if file not found
+        story_words = ["the", "quick", "brown", "fox", "jumps"] * 400
     
-    # Create random data times
+    story_words = story_words[:2000]  # Use smaller subset for faster testing
+
+    # create random data times
     np.random.seed(42)  # For reproducible tests
-    data_times = np.cumsum(np.random.rand(len(story_words)) + 0.5)
-    
+    data_times = np.cumsum(np.random.rand(len(story_words)) + .5)
+
     # Create random TRs
     tr_times = np.arange(0, data_times[-1] + 10, 2)
     ds = DataSequence(story_words, [len(story_words)], data_times, tr_times)
