@@ -38,162 +38,6 @@ def compute_correct_tokens_opt(acc, acc_lookback, acc_offset, total_len):
     return new_tokens
 
 
-
-def generate_efficient_feat_dicts_opt(wordseqs, tokenizer, lookback1, lookback2):
-    text_dict = {}
-    text_dict2 = {}
-    text_dict3 = {}
-    for story in wordseqs.keys():
-        ds = wordseqs[story]
-        newdata = []
-        total_len = len(ds.data)
-        acc = []
-        acc8 = 0
-        text = [" ".join(ds.data)]
-        text_len = len(text[0])
-        inputs = tokenizer(text, return_tensors="pt")
-        tokens = np.array(inputs['input_ids'][0])
-        assert (27 not in tokens)
-        # Annotate word boundaries
-        for ei,i in enumerate(tokens):
-            # A lot of tokenization edge cases
-            if (tokenizer.decode(torch.tensor([i]))[0] == ' ' and tokenizer.decode(torch.tensor([i])).strip() != '') or (tokenizer.decode(torch.tensor([i])) != '</s>' and ei == 1):
-                acc.append(27)
-                acc.append(i)
-                acc8 += 1
-            elif (ei==1860 and i == 2836) or (ei==349 and i == 1437) or (ei==365 and i == 1437) or (ei==1914 and i == 1437) or (ei==1305 and i == 1437) or (ei==300 and i==1437 and story=='beneaththemushroomcloud') or (ei==202 and i == 3432) or (ei==1316 and i==4514) or (ei==656 and i==2550) or (ei==1358 and i==6355) or (ei==2160 and i==8629) or (i==24929 and ei != 2):
-                acc.append(27)
-                acc.append(i)
-                acc8 += 1
-            else:
-                acc.append(i)
-        acc.append(27)
-        #print(acc)
-        lookback1 = 256
-        lookback2 = 512
-        acc_lookback = 0
-        misc_offset = 0
-        new_tokens = [2]
-        #print(tokenizer.decode(new_tokens))
-        for i, w in enumerate(ds.data):
-            if w.strip() != '' and w != "'s":
-                if acc_lookback < lookback1:
-                    new_tokens = compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
-                    #print(tokenizer.decode(torch.tensor(new_tokens)))
-                    text_dict[(story, i)] = new_tokens
-                    text_dict2[(story, i)] = False
-                    text_dict3[tuple(new_tokens)] = False
-                elif lookback2 > acc_lookback and acc_lookback >= lookback1:
-                    new_tokens = compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
-                    #print(tokenizer.decode(torch.tensor(new_tokens)))
-                    text_dict[(story, i)] = new_tokens
-                    text_dict2[(story, i)] = False
-                    text_dict3[tuple(new_tokens)] = False
-                elif acc_lookback == lookback2:
-                    new_tokens = compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
-                    #print(tokenizer.decode(torch.tensor(new_tokens)))
-                    acc_lookback = lookback1
-                    text_dict[(story, i)] = new_tokens
-                    text_dict2[(story, i)] = True
-                    text_dict3[tuple(new_tokens)] = False
-                else:
-                    print("WARNING, LOOKBACK EDGE CASE 1", acc_lookback, "\n")
-                    assert False
-                    #print(max(0, i-acc_lookback), min(i+1, total_len))
-                    #text = [" ".join(ds.data[max(0,i-acc_lookback):min(i+1,total_len)])][0]
-                    #print(text)
-                    text_dict[(story, i)] = new_tokens
-                    text_dict2[(story, i)] = False
-                    text_dict3[tuple(new_tokens)] = False
-            else:
-                #hidden_states = np.zeros((1024,))
-                text_dict[(story, i)] = new_tokens
-                text_dict2[(story, i)] = True
-                text_dict3[tuple(new_tokens)] = False
-                acc_lookback += 1
-                misc_offset -= 1
-                continue
-            acc_lookback += 1
-            if i == total_len - 1:
-                text_dict2[(story, i)] = True
-    return text_dict, text_dict2, text_dict3
-
-
-def convert_to_feature_mats_opt(wordseqs, tokenizer, lookback1, lookback2, text_dict3):
-    text_dict = {}
-    text_dict2 = {}
-    featureseqs = {}
-    for story in wordseqs.keys():
-        ds = wordseqs[story]
-        newdata = []
-        total_len = len(ds.data)
-        acc = []
-        acc8 = 0
-        text = [" ".join(ds.data)]
-        text_len = len(text[0])
-        inputs = tokenizer(text, return_tensors="pt")
-        tokens = np.array(inputs['input_ids'][0])
-        assert (27 not in tokens)
-        # Annotate word boundaries
-        for ei,i in enumerate(tokens):
-            # A lot of tokenization edge cases
-            if (tokenizer.decode(torch.tensor([i]))[0] == ' ' and tokenizer.decode(torch.tensor([i])).strip() != '') or (tokenizer.decode(torch.tensor([i])) != '</s>' and ei == 1):
-                acc.append(27)
-                acc.append(i)
-                acc8 += 1
-            elif (ei==1860 and i == 2836) or (ei==349 and i == 1437) or (ei==365 and i == 1437) or (ei==1914 and i == 1437) or (ei==1305 and i == 1437) or (ei==300 and i==1437 and story=='beneaththemushroomcloud') or (ei==202 and i == 3432) or (ei==1316 and i==4514) or (ei==656 and i==2550) or (ei==1358 and i==6355) or (ei==2160 and i==8629) or (i==24929 and ei != 2):
-                acc.append(27)
-                acc.append(i)
-                acc8 += 1
-            else:
-                acc.append(i)
-        acc.append(27)
-        lookback1 = 256
-        lookback2 = 512
-        acc_lookback = 0
-        misc_offset = 0
-        new_tokens = [2]
-        for i, w in enumerate(ds.data):
-            if w.strip() != '' and w != "'s":
-                if acc_lookback < lookback1:
-                    new_tokens = compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
-                    text_dict[(story, i)] = new_tokens
-                    text_dict2[(story, i)] = False
-                    newdata.append(text_dict3[tuple(new_tokens)])
-                elif lookback2 > acc_lookback and acc_lookback >= lookback1:
-                    new_tokens = compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
-                    text_dict[(story, i)] = new_tokens
-                    text_dict2[(story, i)] = False
-                    newdata.append(text_dict3[tuple(new_tokens)])
-                elif acc_lookback == lookback2:
-                    new_tokens = compute_correct_tokens_opt(acc, acc_lookback, i + misc_offset, total_len)
-                    acc_lookback = lookback1
-                    text_dict[(story, i)] = new_tokens
-                    text_dict2[(story, i)] = True
-                    newdata.append(text_dict3[tuple(new_tokens)])
-                else:
-                    print("WARNING, LOOKBACK EDGE CASE 1", acc_lookback, "\n")
-                    assert False
-                    text_dict[(story, i)] = new_tokens
-                    text_dict2[(story, i)] = False
-                    newdata.append(text_dict3[tuple(new_tokens)])
-            else:
-                text_dict[(story, i)] = new_tokens
-                text_dict2[(story, i)] = True
-                newdata.append(text_dict3[tuple(new_tokens)])
-                acc_lookback += 1
-                misc_offset -= 1
-                continue
-            acc_lookback += 1
-            if i == total_len - 1:
-                text_dict2[(story, i)] = True
-        featureseqs[story] = DataSequence(np.array(newdata), ds.split_inds, ds.data_times, ds.tr_times)
-    downsampled_featureseqs = {}
-    for story in featureseqs:
-        downsampled_featureseqs[story] = featureseqs[story].chunksums('lanczos', window=3)
-    return downsampled_featureseqs
-
-
 def compute_correct_tokens_llama(acc, acc_lookback, acc_offset, total_len):
     new_tokens = [1]
     acc_count_all = 0
@@ -356,3 +200,165 @@ def convert_to_feature_mats_llama(wordseqs, tokenizer, lookback1, lookback2, tex
         for story in featureseqs:
             downsampled_featureseqs[story] = featureseqs[story].chunksums('lanczos', window=3)
         return downsampled_featureseqs
+
+OPT_BOS_TOKEN = 2
+OPT_WORD_BOUNDARY_TOKEN = 27
+
+def generate_efficient_feat_dicts_opt(wordseqs, tokenizer, lookback1, lookback2):
+    """
+    Generate efficient feature dictionaries for OPT models.
+    
+    Returns:
+        word_to_tokens: Dict mapping (story, word_index) to list of token IDs
+        compute_embeddings_flags: Dict mapping (story, word_index) to bool indicating if embeddings should be computed
+        token_sequence_registry: Dict mapping tuple of token IDs to placeholder for embeddings
+    """
+    word_to_tokens = {}
+    compute_embeddings_flags = {}
+    token_sequence_registry = {}
+    
+    for story in wordseqs.keys():
+        ds = wordseqs[story]
+        total_len = len(ds.data)
+        
+        # Tokenize the entire story and annotate word boundaries
+        annotated_tokens = _annotate_word_boundaries_opt(ds.data, tokenizer, story)
+        
+        # Process each word with lookback logic
+        lookback_count = 0
+        misc_offset = 0
+        current_tokens = [OPT_BOS_TOKEN]  # OPT start token
+        
+        for word_idx, word in enumerate(ds.data):
+            if word.strip() != '' and word != "'s":
+                # Generate tokens for current context window
+                if lookback_count < lookback1:
+                    current_tokens = compute_correct_tokens_opt(annotated_tokens, lookback_count, word_idx + misc_offset, total_len)
+                    word_to_tokens[(story, word_idx)] = current_tokens
+                    compute_embeddings_flags[(story, word_idx)] = False
+                    token_sequence_registry[tuple(current_tokens)] = False
+                elif lookback2 > lookback_count >= lookback1:
+                    current_tokens = compute_correct_tokens_opt(annotated_tokens, lookback_count, word_idx + misc_offset, total_len)
+                    word_to_tokens[(story, word_idx)] = current_tokens
+                    compute_embeddings_flags[(story, word_idx)] = False
+                    token_sequence_registry[tuple(current_tokens)] = False
+                elif lookback_count == lookback2:
+                    current_tokens = compute_correct_tokens_opt(annotated_tokens, lookback_count, word_idx + misc_offset, total_len)
+                    lookback_count = lookback1  # Reset lookback
+                    word_to_tokens[(story, word_idx)] = current_tokens
+                    compute_embeddings_flags[(story, word_idx)] = True
+                    token_sequence_registry[tuple(current_tokens)] = False
+                else:
+                    print("WARNING, LOOKBACK EDGE CASE 1", lookback_count, "\n")
+                    assert False
+            else:
+                # Handle empty words or contractions
+                word_to_tokens[(story, word_idx)] = current_tokens
+                compute_embeddings_flags[(story, word_idx)] = True
+                token_sequence_registry[tuple(current_tokens)] = False
+                lookback_count += 1
+                misc_offset -= 1
+                continue
+                
+            lookback_count += 1
+            if word_idx == total_len - 1:
+                compute_embeddings_flags[(story, word_idx)] = True
+                
+    return word_to_tokens, compute_embeddings_flags, token_sequence_registry
+
+
+def _annotate_word_boundaries_opt(words, tokenizer, story):
+    """
+    Tokenize words and annotate word boundaries with special marker (27).
+    
+    Args:
+        words: List of words in the story
+        tokenizer: OPT tokenizer
+        story: Story name for edge case handling
+        
+    Returns:
+        List of tokens with word boundary markers (27) inserted
+    """
+    text = [" ".join(words)]
+    inputs = tokenizer(text, return_tensors="pt")
+    tokens = np.array(inputs['input_ids'][0])
+    assert (OPT_WORD_BOUNDARY_TOKEN not in tokens)  # Ensure our boundary marker isn't in the original tokens
+    
+    annotated_tokens = []
+    
+    for ei, token_id in enumerate(tokens):
+        # Handle various tokenization edge cases for word boundaries
+        decoded_token = tokenizer.decode(torch.tensor([token_id]))
+        
+        if ((decoded_token[0] == ' ' and decoded_token.strip() != '') or 
+            (decoded_token != '</s>' and ei == 1)):
+            annotated_tokens.append(OPT_WORD_BOUNDARY_TOKEN)  # Word boundary marker
+            annotated_tokens.append(token_id)
+        elif _is_edge_case_word_boundary_opt(ei, token_id, story):
+            annotated_tokens.append(OPT_WORD_BOUNDARY_TOKEN)  # Word boundary marker
+            annotated_tokens.append(token_id)
+        else:
+            annotated_tokens.append(token_id)
+    
+    annotated_tokens.append(OPT_WORD_BOUNDARY_TOKEN)  # Final boundary marker
+    return annotated_tokens
+
+
+def _is_edge_case_word_boundary_opt(token_idx, token_id, story):
+    """Handle specific tokenization edge cases for word boundaries."""
+    edge_cases = [
+        (1860, 2836), (349, 1437), (365, 1437), (1914, 1437), (1305, 1437),
+        (202, 3432), (1316, 4514), (656, 2550), (1358, 6355), (2160, 8629)
+    ]
+    
+    # Special case for specific story
+    if token_idx == 300 and token_id == 1437 and story == 'beneaththemushroomcloud':
+        return True
+    
+    # General edge cases
+    if (token_idx, token_id) in edge_cases:
+        return True
+        
+    # Special token case
+    if token_id == 24929 and token_idx != OPT_BOS_TOKEN:
+        return True
+        
+    return False
+
+def convert_to_feature_mats_opt(wordseqs, word_to_tokens, embedding_cache):
+    """
+    Convert word sequences to feature matrices using pre-computed embeddings.
+    
+    Args:
+        wordseqs: Dictionary of story name to DataSequence
+        word_to_tokens: Dictionary mapping (story, word_index) to token sequences
+        embedding_cache: Dictionary mapping token sequences to embeddings
+        
+    Returns:
+        Dictionary of story name to downsampled feature matrices
+    """
+    featureseqs = {}
+    
+    for story in wordseqs.keys():
+        ds = wordseqs[story]
+        word_features = []
+        
+        for word_idx, word in enumerate(ds.data):
+            # Get the token sequence for this word
+            token_sequence = tuple(word_to_tokens[(story, word_idx)])
+            
+            # Look up the embedding in the cache
+            if token_sequence in embedding_cache and isinstance(embedding_cache[token_sequence], np.ndarray):
+                word_features.append(embedding_cache[token_sequence])
+            else:
+                # This shouldn't happen if the pipeline is set up correctly
+                raise ValueError(f"No embedding found for word {word_idx} in story {story}")
+        
+        featureseqs[story] = DataSequence(np.array(word_features), ds.split_inds, ds.data_times, ds.tr_times)
+    
+    # Downsample features
+    downsampled_featureseqs = {}
+    for story in featureseqs:
+        downsampled_featureseqs[story] = featureseqs[story].chunksums('lanczos', window=3)
+    
+    return downsampled_featureseqs
